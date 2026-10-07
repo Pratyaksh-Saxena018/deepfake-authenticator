@@ -7,37 +7,47 @@ import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 from utils.spectral_engine import SpectralAnalyzer
+import albumentations as A
 
 def train_model():
     print("=== 1. Initializing Feature Extraction Pipeline ===")
     analyzer = SpectralAnalyzer()
+    
+    # Harden with Albumentations
+    augmentor = A.Compose([
+        A.ImageCompression(quality_lower=30, quality_upper=90, p=0.5),
+        A.GaussianBlur(blur_limit=(3, 7), p=0.5),
+        A.GaussNoise(var_limit=(10.0, 50.0), p=0.5)
+    ])
     
     real_dir = "data/dataset/real"
     fake_dir = "data/dataset/fake"
     
     data_rows = []
     
-    # 1. Extract features from Real images (Label = 0)
-    print("Extracting frequency metrics from Real faces...")
-    for filename in os.listdir(real_dir):
-        if filename.endswith(".jpg") or filename.endswith(".png"):
-            img_path = os.path.join(real_dir, filename)
-            img = cv2.imread(img_path)
-            if img is not None:
-                features, _ = analyzer.extract_all(img)
-                features["label"] = 0  # 0 = Authentic
-                data_rows.append(features)
-                
-    # 2. Extract features from Fake images (Label = 1)
-    print("Extracting frequency metrics from AI-Generated faces...")
-    for filename in os.listdir(fake_dir):
-        if filename.endswith(".jpg") or filename.endswith(".png"):
-            img_path = os.path.join(fake_dir, filename)
-            img = cv2.imread(img_path)
-            if img is not None:
-                features, _ = analyzer.extract_all(img)
-                features["label"] = 1  # 1 = Deepfake
-                data_rows.append(features)
+    def process_directory(directory, label, desc):
+        print(f"Extracting frequency metrics from {desc}...")
+        if not os.path.exists(directory):
+            print(f"Directory {directory} not found. Skipping.")
+            return
+        for filename in os.listdir(directory):
+            if filename.endswith(".jpg") or filename.endswith(".png"):
+                img_path = os.path.join(directory, filename)
+                img = cv2.imread(img_path)
+                if img is not None:
+                    # Original
+                    features, _ = analyzer.extract_all(img)
+                    features["label"] = label
+                    data_rows.append(features)
+                    
+                    # Augmented (to double the dataset and harden it)
+                    aug_img = augmentor(image=img)['image']
+                    aug_features, _ = analyzer.extract_all(aug_img)
+                    aug_features["label"] = label
+                    data_rows.append(aug_features)
+
+    process_directory(real_dir, 0, "Real faces")
+    process_directory(fake_dir, 1, "AI-Generated faces")
 
     # Convert to Pandas DataFrame
     df = pd.DataFrame(data_rows)

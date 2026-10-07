@@ -3,18 +3,23 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+import albumentations as A
 from PIL import Image
 from transformers import MobileViTForImageClassification, MobileViTImageProcessor
 from sklearn.model_selection import train_test_split
+import numpy as np
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 print(f"🚀 Optimized Training Platform Active: {device}")
 
 # 1. Standardizing Augmentation Pipeline to destroy memorization
-train_transform = transforms.Compose([
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomRotation(degrees=15),
-    transforms.ColorJitter(brightness=0.1, contrast=0.1)
+train_transform = A.Compose([
+    A.HorizontalFlip(p=0.5),
+    A.Rotate(limit=15, p=0.5),
+    A.ImageCompression(quality_lower=30, quality_upper=90, p=0.5),
+    A.GaussianBlur(blur_limit=(3, 7), p=0.5),
+    A.GaussNoise(var_limit=(10.0, 50.0), p=0.5),
+    A.RandomBrightnessContrast(p=0.5)
 ])
 
 class CIPLabDataset(Dataset):
@@ -33,12 +38,15 @@ class CIPLabDataset(Dataset):
             
             # Apply dynamic geometrical variation only during training
             if self.transform:
-                image = self.transform(image)
+                image_np = np.array(image)
+                augmented = self.transform(image=image_np)
+                image = Image.fromarray(augmented['image'])
                 
             inputs = self.processor(images=image, return_tensors="pt")
             pixel_values = inputs["pixel_values"].squeeze(0)
             return pixel_values, torch.tensor(self.labels[idx], dtype=torch.long)
-        except Exception:
+        except Exception as e:
+            print(f"Error loading {self.file_paths[idx]}: {e}")
             return torch.zeros(3, 256, 256), torch.tensor(self.labels[idx], dtype=torch.long)
 
 def gather_paths():
