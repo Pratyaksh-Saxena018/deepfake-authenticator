@@ -1,0 +1,9 @@
+venv/
+.venv/
+data/
+data/dataset/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.DS_Store
